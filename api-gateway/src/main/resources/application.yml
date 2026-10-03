@@ -1,0 +1,26 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+            # Ruta de prueba: httpbin devuelve los headers que recibe.
+            # GET localhost:8080/test/headers  ->  https://httpbin.org/headers
+            - id: test
+              uri: https://httpbin.org
+              predicates:
+                - Path=/test/**
+              filters:
+                - StripPrefix=1
+
+app:
+  security:
+    jwt:
+      public-key: classpath:keys/public.pem
+      issuer: facturacion-auth
+      public-paths: /auth/**,/actuator/health/**,/hola/**,/demo/**
