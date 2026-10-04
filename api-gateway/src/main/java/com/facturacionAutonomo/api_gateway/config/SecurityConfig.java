@@ -23,6 +23,10 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverterAdapter;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.security.web.server.ServerAuthenticationEntryPoint;
+
+import com.facturacionAutonomo.api_gateway.security.JwtAccessDeniedHandler;
+import com.facturacionAutonomo.api_gateway.security.JwtAuthenticationEntryPoint;
 
 import reactor.core.publisher.Mono;
 
@@ -35,6 +39,10 @@ public class SecurityConfig {
 	private final Resource publicKey;
 	private final String issuer;
 	private final String[] publicPaths;
+	private final JwtAuthenticationEntryPoint jwtautenticapoint;
+	private final JwtAccessDeniedHandler jwtaccesdenegado;
+	
+	
 	
 	
 	
@@ -42,11 +50,15 @@ public class SecurityConfig {
 	public SecurityConfig(
 			@Value("${app.security.jwt.public-key}")Resource publicKey, 
 			@Value("${app.security.jwt.issuer}")String issuer, 
-			@Value("${app.security.jwt.public-paths}")String[] publicPaths) {
+			@Value("${app.security.jwt.public-paths}")String[] publicPaths,
+			JwtAuthenticationEntryPoint jwtautenticapoint,
+			JwtAccessDeniedHandler jwtaccesdenegado) {
 		super();
 		this.publicKey = publicKey;
 		this.issuer = issuer;
 		this.publicPaths = publicPaths;
+		this.jwtautenticapoint = jwtautenticapoint;
+		this.jwtaccesdenegado = jwtaccesdenegado;
 	}
 	
 	@Bean
@@ -72,10 +84,13 @@ public class SecurityConfig {
     
     @Bean
     public SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
-        http
+		http
             .csrf(ServerHttpSecurity.CsrfSpec::disable)
             .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
             .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
+            .exceptionHandling(e->
+            	e.authenticationEntryPoint(jwtautenticapoint)
+            	.accessDeniedHandler(jwtaccesdenegado))
             .authorizeExchange(authorize -> authorize
                 .pathMatchers(HttpMethod.OPTIONS).permitAll()
                 .pathMatchers(publicPaths).permitAll()         
@@ -83,6 +98,8 @@ public class SecurityConfig {
                 .anyExchange().authenticated()
             )
             .oauth2ResourceServer(oauth2 -> oauth2
+            	.authenticationEntryPoint(jwtautenticapoint)
+            	.accessDeniedHandler(jwtaccesdenegado)
                 .jwt(jwt -> jwt.jwtAuthenticationConverter(grantedAuthoritiesExtractor()))
             );
         System.out.println("RUTAS PUBLICAS: " + java.util.Arrays.toString(publicPaths));

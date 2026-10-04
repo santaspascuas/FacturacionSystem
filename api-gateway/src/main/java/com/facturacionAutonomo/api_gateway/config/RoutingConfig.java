@@ -12,8 +12,15 @@ public class RoutingConfig {
 	@Bean
 	public RouteLocator router(RouteLocatorBuilder builder) {
 		
-		return builder.routes().route("demo", r->r.path("/demo/**").filters(f->f.stripPrefix(1)).uri("http:/localhost:8080")).build();
-		
+		return builder.routes().route("demo", 
+				r->r.path("/demo/**").
+				filters(f->f.stripPrefix(1)).
+				uri("http:/localhost:8080"))
+				.route("caido",
+				r->r.path("/caido/**")
+				.filters(f->f.stripPrefix(1))
+				.uri("http://localhost:9999"))
+				.build();	
 	}
 	
 	

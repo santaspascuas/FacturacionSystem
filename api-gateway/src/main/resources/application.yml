@@ -23,4 +23,4 @@ app:
     jwt:
       public-key: classpath:keys/public.pem
       issuer: facturacion-auth
-      public-paths: /auth/**,/actuator/health/**,/hola/**,/demo/**
+      public-paths: /auth/**,/actuator/health/**
