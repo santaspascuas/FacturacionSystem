@@ -1,0 +1,11 @@
+COMANDOS DE DOCKER
+
+docker compose up -d	Levanta los contenedores en segundo plano
+docker compose ps	Estado de los contenedores (debe decir healthy)
+docker compose logs -f auth-db	Ver los logs de Postgres en vivo (Ctrl+C para salir)
+docker compose stop	Para los contenedores sin borrar nada
+docker compose start	Los vuelve a arrancar
+docker compose down	Para y elimina los contenedores. Los datos se conservan en el volumen
+docker compose down -v	⚠️ Elimina contenedores y datos. Base de datos vacía desde cero
+
+docker exec -it facturacion-auth-db psql -U auth_user -d auth_db

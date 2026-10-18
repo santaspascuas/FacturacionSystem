@@ -1,0 +1,300 @@
+====================================================================
+ GUIA DE PRUEBAS - auth-service
+ Parte 1: probar a mano (Postman + base de datos)
+ Parte 2: que tests escribir y como (sin la solucion, para aprender)
+ Parte 3: trampas de Spring Boot 4 que te vas a encontrar
+====================================================================
+
+URL base:  http://localhost:8081      (el 8080 es del api-gateway)
+Perfil:    dev (se activa solo si no indicas ninguno)
+BD local:  docker exec -it facturacion-auth-db psql -U postgres -d auth_db
+
+
+====================================================================
+ PARTE 1 - PRUEBAS MANUALES
+====================================================================
+
+En Postman crea una coleccion con variables: base = http://localhost:8081,
+email, accessToken, refreshToken. Todas las peticiones con cuerpo llevan
+la cabecera  Content-Type: application/json
+
+--------------------------------------------------------------------
+ 1.1 Registro
+--------------------------------------------------------------------
+POST {{base}}/api/auth/register
+{ "email": "ana@example.com", "password": "Password123!" }
+
+Esperado: 201, data.id, data.tenantId, data.role = "USER"
+Comprueba en BD:
+  select public_id, email, role, failed_attempts, account_non_locked from users where email='ana@example.com';
+  select name from tenants order by tenant_id desc limit 1;     -> tenant_<uuid del tenant>
+
+Casos de error:
+  - Mismo email otra vez                    -> 409 "El email ya está registrado"
+  - "password": "corta"                     -> 400 "...al menos 8 caracteres"
+  - "email": "no-es-email"                  -> 400 "Formato de email inválido"
+  - Cuerpo  {esto no es json                -> 400 "El cuerpo de la petición no es un JSON válido"
+  - Tras un 409/400: el numero de tenants NO debe subir (select count(*) from tenants;)
+
+--------------------------------------------------------------------
+ 1.2 Login
+--------------------------------------------------------------------
+POST {{base}}/api/auth/login
+{ "email": "ana@example.com", "password": "Password123!" }
+
+Esperado: 200
+  data.accessToken  (JWT)       -> guardalo en la variable accessToken
+  data.refreshToken (43 chars)  -> guardalo en la variable refreshToken
+  data.tokenType = "Bearer", data.expiresIn = 900
+
+Mira el JWT en https://jwt.io : cabecera { kid: auth-key-1, alg: RS256 },
+payload con sub (uuid), tenant_id, roles, iss, aud, exp-iat = 900.
+
+Comprueba en BD (solo el HASH, nunca el token en claro):
+  select r.token_hash, r.revoked, r.version, r.expires_at from refresh_tokens r
+  join users u on u.user_id = r.user_id where u.email='ana@example.com';
+Haz login otra vez: misma fila, token_hash distinto, version +1 (un solo dispositivo).
+
+Casos de error (fijate que el MENSAJE es el mismo en los dos primeros):
+  - Email que no existe           -> 401 "Email o contraseña incorrectos"
+  - Contraseña incorrecta         -> 401 "Email o contraseña incorrectos"
+  - "email": "basura"             -> 400 (validacion del DTO, antes de llegar al servicio)
+
+--------------------------------------------------------------------
+ 1.3 Endpoint protegido
+--------------------------------------------------------------------
+GET {{base}}/api/users/me
+Cabecera: Authorization: Bearer {{accessToken}}
+
+  - Con token valido                       -> 200 con userId, tenantId, roles
+  - Sin cabecera                           -> 401
+  - Cambia UNA letra del final del token   -> 401 (invalid signature)
+  - "Bearer basura"                        -> 401 (malformed)
+
+--------------------------------------------------------------------
+ 1.4 Refresh (rotacion)
+--------------------------------------------------------------------
+POST {{base}}/api/auth/refresco
+{ "refreshToken": "{{refreshToken}}" }
+
+  - Primera vez                     -> 200 con accessToken y refreshToken NUEVOS
+  - Repite con el refresh ANTIGUO   -> 401 (ya se roto, su hash no existe)
+  - Con el refresh NUEVO            -> 200
+  - Token inventado                 -> 401
+  - Sin campo refreshToken          -> 400
+
+Forzar caducidad del refresh para probarlo:
+  update refresh_tokens set expires_at = '2000-01-01' where user_id =
+    (select user_id from users where email='ana@example.com');
+  -> el refresh pasa a dar 401
+
+--------------------------------------------------------------------
+ 1.5 Logout
+--------------------------------------------------------------------
+POST {{base}}/api/auth/logout
+{ "refreshToken": "{{refreshToken}}" }
+
+  - Siempre 204 (exista o no el token: no revela nada)
+  - Despues, refresco con ese token -> 401
+  - En BD: revoked = true
+  - Nuevo login: la misma fila vuelve a revoked = false (reemitir)
+  - OJO: el accessToken sigue valiendo hasta que caduque (15 min). Es lo esperado
+    con JWT: por eso dura poco. Comprueba /api/users/me tras el logout.
+
+--------------------------------------------------------------------
+ 1.6 Bloqueo tras 3 intentos
+--------------------------------------------------------------------
+Con un usuario nuevo:
+  - Login con contraseña mala  -> 401   (failed_attempts = 1)
+  - Login con contraseña mala  -> 401   (failed_attempts = 2)
+  - Login con contraseña mala  -> 423   (account_non_locked = false, lock_time relleno)
+  - Login con la BUENA         -> 423   (bloqueada: ni se comprueba la contraseña)
+  - Refresco con su refresh    -> 423   (el refresh tambien comprueba el bloqueo)
+Y el caso contrario: 2 malas + 1 buena -> 200 y failed_attempts vuelve a 0.
+
+  select failed_attempts, account_non_locked, lock_time from users where email='...';
+
+Desbloquear a mano para seguir probando (todavia no hay flujo de desbloqueo):
+  update users set account_non_locked = true, failed_attempts = 0, lock_time = null where email='...';
+
+--------------------------------------------------------------------
+ 1.7 Caducidad del access token
+--------------------------------------------------------------------
+Arranca con el access token a 1 minuto (argumento del run en Eclipse):
+  --app.security.jwt.access-token-ttl=1m
+Login, espera y llama a /api/users/me.
+Pregunta trampa: ¿por que sigue funcionando un poco mas de 1 minuto?
+  -> el decoder permite 60 s de desfase de relojes. Caduca de verdad a los ~2 min.
+
+--------------------------------------------------------------------
+ 1.8 JWKS y salud
+--------------------------------------------------------------------
+GET {{base}}/.well-known/jwks.json
+  -> keys[0].kid = auth-key-1, kty = RSA, n y e presentes.
+  -> NO deben aparecer d, p, q, dp, dq, qi (eso seria la clave PRIVADA).
+GET {{base}}/actuator/health/liveness   -> {"status":"UP"}
+GET {{base}}/actuator/health/readiness  -> {"status":"UP"}
+
+
+====================================================================
+ PARTE 2 - TESTS AUTOMATICOS (escribelos tu)
+====================================================================
+
+Como ejecutarlos:
+  mvnw test                          todos
+  mvnw test -Dtest=EmailTest         solo una clase
+  mvnw test -Dtest=EmailTest#metodo  solo un metodo
+
+Donde: src/test/java con el MISMO paquete que la clase probada.
+Nombre: <Clase>Test. Metodos que se lean como una frase:
+  renovarUnTokenRevocadoLanzaExcepcion(), emailDuplicadoNoGuardaNada()...
+Estructura de cada test: Given (preparar) / When (UNA accion) / Then (comprobar).
+
+Herramientas (ya estan en el pom via spring-boot-starter-test):
+  JUnit 6      @Test, @BeforeEach, @ParameterizedTest + @ValueSource / @NullAndEmptySource
+  AssertJ      assertThat(x).isEqualTo(..), assertThatThrownBy(() -> ..).isInstanceOf(..)
+  Mockito      @ExtendWith(MockitoExtension.class), @Mock, when().thenReturn(),
+               thenAnswer(inv -> inv.getArgument(0)), verify(), never(),
+               verifyNoInteractions(), ArgumentCaptor, InOrder
+
+Orden recomendado (de mas facil a mas dificil):
+
+--------------------------------------------------------------------
+ 2.1 Dominio (sin Mockito, sin Spring: new y assert)
+--------------------------------------------------------------------
+EmailTest
+  - normaliza espacios y mayusculas ("  Pepe@Mail.COM " -> "pepe@mail.com")
+  - dos Email con el mismo valor normalizado son equals (es un record)
+  - rechaza null, "", " ", "sin-arroba", "a@b", "a b@c.com", "@c.com"
+    -> un solo @ParameterizedTest, espera DatoInvalidoException
+
+TenantTest
+  - crearTenantPorDefecto: name = "tenant_" + id
+  - crearTenant recorta el nombre; nombre en blanco -> DatoInvalidoException
+  - fecha null -> DatoInvalidoException
+
+UserTest
+  - crearUser: id no nulo, 0 intentos, no bloqueado
+  - crearUser con tenantId/email/role null o hash vacio -> DatoInvalidoException
+  - 2 intentos fallidos: NO bloquea
+  - 3er intento: bloquea y lockTime = la fecha que pasaste
+  - INMUTABLE: registrarIntentoFallido no cambia el objeto original
+  - registrarLoginCorrecto reinicia a 0; si ya estaba a 0 devuelve el MISMO objeto (isSameAs)
+
+RefreshTokenTest  (el que mas ensena; usa una fecha fija, nunca LocalDateTime.now())
+  - crear: expiresAt = now + ttl, no revocado, activo
+  - estaActivo: 1 s antes de expiresAt -> true; justo en expiresAt -> false
+  - revocado -> no activo
+  - renovar activo: cambia hash, createdAt y expiresAt
+  - renovar revocado -> RefreshTokenInvalidoException
+  - renovar caducado (now = expiresAt + 1 dia) -> RefreshTokenInvalidoException
+  - reemitir revocado -> funciona y queda activo
+  - crear con userId null / hash en blanco / Duration.ZERO -> DatoInvalidoException
+
+--------------------------------------------------------------------
+ 2.2 Adaptadores puros (sin Spring)
+--------------------------------------------------------------------
+Sha256TokenHasherTest
+  - valor conocido: hash("abc") =
+    ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+  - determinista y distingue tokens; 64 caracteres [0-9a-f]; null -> IllegalArgumentException
+
+SecureRandomRefreshTokenGeneratorTest
+  - 43 caracteres, solo [A-Za-z0-9_-]
+  - 1000 llamadas -> 1000 valores distintos (mete en un Set)
+
+--------------------------------------------------------------------
+ 2.3 Servicios (Mockito: se simulan los PUERTOS, nunca el dominio)
+--------------------------------------------------------------------
+Esqueleto:
+  @ExtendWith(MockitoExtension.class)
+  class XServiceTest {
+      @Mock UserRepositoryPort userRepository;  ...
+      XService service;
+      @BeforeEach void setUp() { service = new XService(..., Clock.fixed(INSTANTE, ZoneOffset.UTC)); }
+  }
+Clock.fixed -> sabes la hora exacta y puedes comprobar createdAt / expiresAt.
+
+RegisterUserServiceTest
+  - caso feliz: captura el User de userRepository.save (ArgumentCaptor) y comprueba
+    email normalizado, Role.USER, hash, tenantId = id del Tenant guardado, createdAt del Clock
+  - orden (InOrder): existsByEmail -> hash -> tenantRepository.save -> userRepository.save
+  - email duplicado: EmailYaRegistradoException, hash NUNCA llamado, nada guardado
+  - password corta / email invalido: verifyNoInteractions de todos los puertos
+
+LoginUserServiceTest
+  OJO: el constructor llama a passwordHasher.hash(...) para el hash ficticio.
+  Haz el when(passwordHasher.hash(anyString())) ANTES del new LoginUserService.
+  - login ok sin refresh previo: devuelve accessToken y refreshToken; el RefreshToken
+    guardado tiene el hash y expiresAt = now + 7 dias; userRepository.save NO se llama
+  - login ok con refresh revocado previo: se reutiliza el MISMO objeto (reemitir)
+  - email inexistente: CredencialesInvalidas y matches(password, "hash-ficticio") SI se llama
+  - email mal formado: CredencialesInvalidas sin tocar userRepository
+  - password mala (0 intentos previos): guarda User con 1 intento; CredencialesInvalidas
+  - password mala con 2 intentos previos: guarda User bloqueado; CuentaBloqueadaException
+  - cuenta bloqueada: CuentaBloqueada y matches NUNCA llamado
+  - login ok con 2 intentos previos: guarda User con 0 intentos
+
+RefreshSessionServiceTest
+  - token valido: refresh nuevo devuelto, save(token) con el hash nuevo
+  - hash inexistente: RefreshTokenInvalido, no save, no se toca userRepository
+  - token revocado: RefreshTokenInvalido (lo lanza el DOMINIO en renovar), no save
+  - usuario bloqueado: CuentaBloqueada, no save, generador nunca llamado
+  - token en blanco: verifyNoInteractions de todo
+
+LogoutServiceTest
+  - token activo: queda revoked y se guarda
+  - inexistente o ya revocado: no se guarda
+  - null: verifyNoInteractions
+
+Pregunta de entrevista: ¿que NO puede probar un test unitario aqui?
+  -> que @Transactional deshaga el tenant si falla el usuario, el UNIQUE de email,
+     el @Version... Eso es de integracion.
+
+--------------------------------------------------------------------
+ 2.4 Integracion (Spring + PostgreSQL real con Testcontainers)
+--------------------------------------------------------------------
+Ya tienes TestcontainersConfiguration (@ServiceConnection levanta postgres:17-alpine
+y Spring se conecta solo). Docker tiene que estar arrancado.
+
+Una clase base abstracta con @SpringBootTest + @Import(TestcontainersConfiguration.class)
+y que tus tests de integracion la extiendan.
+
+Que probar (con MockMvc):
+  - flujo: register 201 -> register 409 -> login 200 (tokenType, expiresIn=900)
+    -> /api/users/me 200 con Bearer y 401 sin el -> refresco 200 -> refresco con el
+    antiguo 401 -> logout 204 -> refresco tras logout 401
+  - 3 logins malos -> 401, 401, 423 y despues el bueno -> 423
+  - email inexistente y password mala devuelven el MISMO message
+  - password corta -> 400 con "8 caracteres"; JSON roto -> 400
+  - jwks: kid, kty, n existen; d y p NO existen (jsonPath("$.keys[0].d").doesNotExist())
+
+
+====================================================================
+ PARTE 3 - TRAMPAS DE SPRING BOOT 4
+====================================================================
+
+1. MockMvc: montalo a mano, es lo mas estable entre versiones:
+     mvc = MockMvcBuilders.webAppContextSetup(context)
+             .apply(SecurityMockMvcConfigurers.springSecurity()).build();
+   (context = @Autowired WebApplicationContext)
+
+2. Leer el JSON de una respuesta: JsonPath (ya viene en el starter de test)
+     String token = JsonPath.read(cuerpo, "$.data.accessToken");
+   Boot 4 usa Jackson 3 (paquete tools.jackson...), no com.fasterxml: si buscas
+   ObjectMapper en tutoriales antiguos, el import no coincidira.
+
+3. La clave JWT en los tests: contextLoads y los de integracion usan el perfil dev,
+   que lee keys/private.pem. En tu maquina funciona; en otra (o en CI) no existe.
+   Solucion profesional: generar un par RSA en el test (KeyPairGenerator, 2048),
+   escribir la privada en PEM PKCS#8 en un fichero temporal y pasarla con
+     @DynamicPropertySource -> registry.add("app.security.jwt.private-key", () -> "file:" + ruta)
+
+4. Mockito avisa "self-attaching" en Java 21: funciona, pero futuras JDK lo bloquearan.
+   La solucion es configurar Mockito como -javaagent en maven-surefire-plugin.
+
+5. Strict stubs: si preparas un when() que el test no usa, Mockito falla con
+   UnnecessaryStubbingException. No es un bug: te avisa de que el test sobra algo.
+
+6. Fechas: nunca LocalDateTime.now() en un test. Fecha fija en el dominio y
+   Clock.fixed en los servicios: tests deterministas, sin esperar 15 min ni 7 dias.

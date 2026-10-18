@@ -1,0 +1,14 @@
+target/
+keys/
+*.pem
+.git/
+.gitignore
+.idea/
+.vscode/
+.settings/
+.classpath
+.project
+*.iml
+HELP.md
+Dockerfile
+.dockerignore
