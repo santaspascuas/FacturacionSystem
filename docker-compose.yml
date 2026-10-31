@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: ${AUTH_DB_USER}
       POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD}
     ports:
-      - "5433:5432"
+      - "55432:5432"
     volumes:
       - auth-db-data:/var/lib/postgresql/data
     healthcheck:
