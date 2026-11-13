@@ -123,8 +123,7 @@ public class AddressEntity {
 	public void setCustomer(CustomerEntity customer) {
 		this.customer = customer;
 	}
-
-	// Sin el customer: evita recursión y cargas lazy fuera de transacción.
+	
 	@Override
 	public String toString() {
 		return "AddressEntity [addressId=" + addressId + ", publicId=" + publicId + ", street=" + street

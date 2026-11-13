@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//d/git/FacturacionSystem/**)",
+      "Read(//d/git/FacturacionSystem/product-service/src/**)",
+      "Read(//d/git/FacturacionSystem/product-service/.github/**)",
+      "Read(//d/git/FacturacionSystem/product-service/src/main/resources/**)",
+      "Read(//d/git/FacturacionSystem/product-service/src/test/**)",
+      "PowerShell(Set-Location D:\\\\git\\\\FacturacionSystem\\\\product-service; .\\\\mvnw.cmd -o -q test-compile; \"exit=$LASTEXITCODE\")",
+      "PowerShell(Remove-Item -Confirm:$false \"D:\\\\git\\\\FacturacionSystem\\\\product-service\\\\src\\\\main\\\\java\\\\com\\\\facturacionAutonomo\\\\product_service\\\\infraestructure\\\\config\\\\PropertiesTipoImpositivoAdapter.java\")"
+    ],
+    "additionalDirectories": [
+      "D:\\git\\FacturacionSystem\\product-service\\src\\main\\resources"
+    ]
+  }
+}

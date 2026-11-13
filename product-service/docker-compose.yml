@@ -1,0 +1,20 @@
+services:
+  customer-db:
+    image: postgres:17-alpine
+    container_name: facturacion-product-db
+    environment:
+      POSTGRES_DB: ${PRODUCT_DB_POSTGRES}
+      POSTGRES_USER: ${PRODUCT_DB_USER}
+      POSTGRES_PASSWORD: ${PRODUCT_DB_PASSWORD}
+    ports:
+      - "${PRODUCT_DB_PORT}:5432"
+    volumes:
+      - product-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PRODUCT_DB_USER} -d ${PRODUCT_DB_POSTGRES}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  product-db-data:
