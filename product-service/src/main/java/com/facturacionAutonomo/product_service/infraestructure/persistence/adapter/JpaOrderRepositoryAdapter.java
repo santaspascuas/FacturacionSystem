@@ -106,6 +106,11 @@ public class JpaOrderRepositoryAdapter implements OrderRepositoryPort{
 
 	@Override
 	public Optional<Order> findByTenantIdAndIdempotencyKey(UUID tenantId, String idempotencyKey) {
+		// Sin clave no se busca: Spring Data convertiría el null en "idempotency_key IS NULL" y devolvería
+		// cualquier pedido SIN clave del tenant (o fallaría si hay varios).
+		if(idempotencyKey == null) {
+			return Optional.empty();
+		}
 		return springrepositoryorder.findByTenantIdAndIdempotencyKey(tenantId, idempotencyKey)
 				.map(OrderEntityMapper::jpaToDominio);
 	}

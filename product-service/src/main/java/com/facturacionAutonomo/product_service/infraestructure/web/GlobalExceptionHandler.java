@@ -30,6 +30,8 @@ import com.facturacionAutonomo.product_service.domain.exception.MesaConPedidoAbi
 import com.facturacionAutonomo.product_service.domain.exception.OrderException;
 import com.facturacionAutonomo.product_service.domain.exception.OrderNotFoundException;
 import com.facturacionAutonomo.product_service.domain.exception.OrderYaRegistradaException;
+import com.facturacionAutonomo.product_service.domain.exception.PaymentException;
+import com.facturacionAutonomo.product_service.domain.exception.PaymentYaRegistradoException;
 import com.facturacionAutonomo.product_service.domain.exception.TableConPedidosException;
 import com.facturacionAutonomo.product_service.domain.exception.TableNotFoundException;
 import com.facturacionAutonomo.product_service.domain.exception.TableYaRegistradaException;
@@ -105,6 +107,16 @@ public class GlobalExceptionHandler {
 
 	@ExceptionHandler(OrderException.class)
 	public ResponseEntity<ApiResponse<Object>> handleOrderException(OrderException ex){
+		return respuesta(HttpStatus.BAD_REQUEST, ex.getMessage());
+	}
+
+	@ExceptionHandler(PaymentYaRegistradoException.class)
+	public ResponseEntity<ApiResponse<Object>> handlePaymentYaRegistrado(PaymentYaRegistradoException ex){
+		return respuesta(HttpStatus.CONFLICT, ex.getMessage());
+	}
+
+	@ExceptionHandler(PaymentException.class)
+	public ResponseEntity<ApiResponse<Object>> handlePaymentException(PaymentException ex){
 		return respuesta(HttpStatus.BAD_REQUEST, ex.getMessage());
 	}
 

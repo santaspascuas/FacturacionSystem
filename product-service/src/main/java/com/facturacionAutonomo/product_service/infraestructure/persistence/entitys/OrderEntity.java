@@ -96,11 +96,16 @@ public class OrderEntity {
 	@Column(name = "tax_amount", nullable = false, precision = 10, scale = 2)
 	private BigDecimal taxAmount = BigDecimal.ZERO;
 
-	@Column(name = "tip_amount", nullable = false, precision = 10, scale = 2)
-	private BigDecimal tipAmount = BigDecimal.ZERO;
-
 	@Column(nullable = false, precision = 10, scale = 2)
 	private BigDecimal total = BigDecimal.ZERO;
+
+	// Suma de los cobros (payments). CHECK de la V12: entre 0 y el total.
+	@Column(name = "paid_amount", nullable = false, precision = 10, scale = 2)
+	private BigDecimal paidAmount = BigDecimal.ZERO;
+
+	// Cuándo quedó pagado del todo (paso a CIERRAYPAGA). Null mientras quede algo pendiente.
+	@Column(name = "paid_at")
+	private LocalDateTime paidAt;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;
@@ -115,7 +120,7 @@ public class OrderEntity {
 	@Version
 	private Long version;
 
-	// Sincronización del TPV: si reintenta enviar el mismo pedido, la misma clave impide que se cree dos veces.
+	
 	@Column(name = "idempotency_key", length = 100)
 	private String idempotencyKey;
 
@@ -236,20 +241,28 @@ public class OrderEntity {
 		this.taxAmount = taxAmount;
 	}
 
-	public BigDecimal getTipAmount() {
-		return tipAmount;
-	}
-
-	public void setTipAmount(BigDecimal tipAmount) {
-		this.tipAmount = tipAmount;
-	}
-
 	public BigDecimal getTotal() {
 		return total;
 	}
 
 	public void setTotal(BigDecimal total) {
 		this.total = total;
+	}
+
+	public BigDecimal getPaidAmount() {
+		return paidAmount;
+	}
+
+	public void setPaidAmount(BigDecimal paidAmount) {
+		this.paidAmount = paidAmount;
+	}
+
+	public LocalDateTime getPaidAt() {
+		return paidAt;
+	}
+
+	public void setPaidAt(LocalDateTime paidAt) {
+		this.paidAt = paidAt;
 	}
 
 	public LocalDateTime getCreatedAt() {
@@ -315,7 +328,7 @@ public class OrderEntity {
 		return "OrderEntity [orderId=" + orderId + ", publicId=" + publicId + ", tenantId=" + tenantId
 				+ ", orderNumber=" + orderNumber + ", orderType=" + orderType + ", status=" + status + ", tableId="
 				+ (table != null ? table.getTableId() : null) + ", numPersonas=" + numPersonas + ", subtotal="
-				+ subtotal + ", taxAmount=" + taxAmount + ", tipAmount=" + tipAmount + ", total=" + total
+				+ subtotal + ", taxRate=" + taxRate + ", taxAmount=" + taxAmount + ", total=" + total + ", paidAmount=" + paidAmount + ", paidAt=" + paidAt
 				+ ", createdAt=" + createdAt + ", updatedAt=" + updatedAt + ", cookedAt=" + cookedAt + ", version="
 				+ version + ", idempotencyKey=" + idempotencyKey + ", clientTimestamp=" + clientTimestamp
 				+ ", syncStatus=" + syncStatus + "]";

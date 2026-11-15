@@ -41,15 +41,16 @@ public class Order {
 	private final Long tableId;
 	private Integer numPersonas;
 	private final List<OrderItem> items;
-	// Base imponible: el importe de las líneas sin el IVA (los precios de la carta llevan el IVA incluido).
 	private BigDecimal subtotal;
-	// Tipo de IVA en % (10.00 en hostelería). Es la foto del tipo vigente al abrir el pedido: si mañana cambia
-	// por ley, este pedido (y su factura) sigue con el que se aplicó.
 	private final BigDecimal taxRate;
-	// Cuota de IVA: la parte del importe de las líneas que es impuesto.
 	private BigDecimal taxAmount;
-	private BigDecimal tipAmount;
 	private BigDecimal total;
+	// Suma de lo cobrado (los Payment del pedido). Cuando llega al total, el pedido queda pagado (CIERRAYPAGA).
+	// Vive en el pedido para que él mismo pueda aplicar sus reglas: no cobrar de más, no bajar el total por debajo
+	// de lo cobrado y no cancelar con dinero cobrado. Cada cobro lo cambia, así que el @Version frena cobros a la vez.
+	private BigDecimal paidAmount;
+	// Cuándo quedó pagado del todo. Null mientras quede algo pendiente.
+	private LocalDateTime paidAt;
 	private final LocalDateTime createdAt;
 	private LocalDateTime updatedAt;
 	private LocalDateTime cookedAt;
@@ -60,9 +61,9 @@ public class Order {
 
 	private Order(Long id, UUID tenantId, UUID publicId, Integer orderNumber, OrderType orderType, OrderStatus status,
 			Long tableId, Integer numPersonas, List<OrderItem> items, BigDecimal subtotal, BigDecimal taxRate,
-			BigDecimal taxAmount, BigDecimal tipAmount, BigDecimal total, LocalDateTime createdAt,
-			LocalDateTime updatedAt, LocalDateTime cookedAt, String idempotencyKey, LocalDateTime clientTimestamp,
-			SyncStatus syncStatus) {
+			BigDecimal taxAmount, BigDecimal total, BigDecimal paidAmount, LocalDateTime paidAt,
+			LocalDateTime createdAt, LocalDateTime updatedAt, LocalDateTime cookedAt, String idempotencyKey,
+			LocalDateTime clientTimestamp, SyncStatus syncStatus) {
 		super();
 		this.id = id;
 		this.tenantId = tenantId;
@@ -77,8 +78,9 @@ public class Order {
 		this.subtotal = subtotal;
 		this.taxRate = taxRate;
 		this.taxAmount = taxAmount;
-		this.tipAmount = tipAmount;
 		this.total = total;
+		this.paidAmount = paidAmount;
+		this.paidAt = paidAt;
 		this.createdAt = createdAt;
 		this.updatedAt = updatedAt;
 		this.cookedAt = cookedAt;
@@ -96,19 +98,19 @@ public class Order {
 		validarMesaSegunTipo(tipoObligatorio(orderType), tableId);
 		return new Order(null, tenantId, UUID.randomUUID(), numeroValido(orderNumber), orderType, OrderStatus.ENVIADO,
 				tableId, personasValidas(numPersonas), List.of(), BigDecimal.ZERO, tipoImpositivoValido(taxRate),
-				BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, now, now, null, idempotencyKey, clientTimestamp,
-				SyncStatus.SYNCED);
+				BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, null, now, now, null, claveOpcional(idempotencyKey),
+				clientTimestamp, SyncStatus.SYNCED);
 	}
 
 	// Reconstruye un pedido leído de la BD, con sus líneas. No valida: los datos ya pasaron las reglas al guardarse.
 	public static Order restoreData(Long id, UUID tenantId, UUID publicId, Integer orderNumber, OrderType orderType,
 			OrderStatus status, Long tableId, Integer numPersonas, List<OrderItem> items, BigDecimal subtotal,
-			BigDecimal taxRate, BigDecimal taxAmount, BigDecimal tipAmount, BigDecimal total, LocalDateTime createdAt,
-			LocalDateTime updatedAt, LocalDateTime cookedAt, String idempotencyKey, LocalDateTime clientTimestamp,
-			SyncStatus syncStatus) {
+			BigDecimal taxRate, BigDecimal taxAmount, BigDecimal total, BigDecimal paidAmount, LocalDateTime paidAt,
+			LocalDateTime createdAt, LocalDateTime updatedAt, LocalDateTime cookedAt, String idempotencyKey,
+			LocalDateTime clientTimestamp, SyncStatus syncStatus) {
 		return new Order(id, tenantId, publicId, orderNumber, orderType, status, tableId, numPersonas, items, subtotal,
-				taxRate, taxAmount, tipAmount, total, createdAt, updatedAt, cookedAt, idempotencyKey, clientTimestamp,
-				syncStatus);
+				taxRate, taxAmount, total, paidAmount, paidAt, createdAt, updatedAt, cookedAt, idempotencyKey,
+				clientTimestamp, syncStatus);
 	}
 
 
@@ -153,6 +155,19 @@ public class Order {
 		return taxRate;
 	}
 
+	// Clave de idempotencia del TPV (del pedido o de un envío de líneas). Opcional: null, "" o "   " es sin clave.
+	// Coincide con VARCHAR(100) de orders.idempotency_key y order_items.idempotency_key.
+	public static String claveOpcional(String idempotencyKey) {
+		if(idempotencyKey == null || idempotencyKey.isBlank()) {
+			return null;
+		}
+		String clave = idempotencyKey.trim();
+		if(clave.length() > 100) {
+			throw new OrderException("La clave de idempotencia no puede superar los 100 caracteres");
+		}
+		return clave;
+	}
+
 	// Comer aquí va en una mesa; para llevar, no.
 	private static void validarMesaSegunTipo(OrderType orderType, Long tableId) {
 		if(orderType == OrderType.COMERAQUI && tableId == null) {
@@ -166,19 +181,35 @@ public class Order {
 
 	// ---------- Líneas (la única forma de cambiar la lista) ----------
 
+	// Un plato nuevo hay que cocinarlo: el pedido vuelve a ENVIADO aunque ya estuviera LISTO.
 	public void addItem(OrderItem item, LocalDateTime now) {
 		comprobarAbierta();
 		if(item == null) {
 			throw new OrderException("La línea es obligatoria");
 		}
 		items.add(item);
+		mandarACocina();
 		recalcularTotales(now);
 	}
 
+	// Si la cantidad sube, también hay más que cocinar: vuelve a ENVIADO. Si baja, el estado no cambia.
 	public void cambiarCantidad(UUID itemPublicId, Integer quantity, LocalDateTime now) {
 		comprobarAbierta();
-		buscarItem(itemPublicId).cambiarCantidad(quantity);
+		OrderItem item = buscarItem(itemPublicId);
+		int cantidad = OrderItem.cantidadValida(quantity);
+		// Antes de tocar nada: cómo quedaría el total con la cantidad nueva.
+		comprobarTotalCubreLoCobrado(total.subtract(item.getLineTotal())
+				.add(item.getUnitPrice().multiply(BigDecimal.valueOf(cantidad))));
+		if(item.cambiarCantidad(cantidad)) {
+			mandarACocina();
+		}
 		recalcularTotales(now);
+	}
+
+	// True si el pedido ya tiene líneas de ese envío del TPV: es un reintento y no hay que añadirlas otra vez.
+	public boolean envioYaAplicado(String idempotencyKey) {
+		String clave = claveOpcional(idempotencyKey);
+		return items.stream().anyMatch(item -> item.esDelEnvio(clave));
 	}
 
 	public void cambiarNotas(UUID itemPublicId, String notes, LocalDateTime now) {
@@ -187,9 +218,15 @@ public class Order {
 		this.updatedAt = now;
 	}
 
+	// Un pedido no se queda sin líneas (el alta exige al menos una): para anularlo entero está CANCELADO.
 	public void quitarItem(UUID itemPublicId, LocalDateTime now) {
 		comprobarAbierta();
-		items.remove(buscarItem(itemPublicId));
+		OrderItem item = buscarItem(itemPublicId);
+		if(items.size() == 1) {
+			throw new OrderException("No se puede quitar la última línea del pedido: anúlalo con el estado CANCELADO");
+		}
+		comprobarTotalCubreLoCobrado(total.subtract(item.getLineTotal()));
+		items.remove(item);
 		recalcularTotales(now);
 	}
 
@@ -211,13 +248,56 @@ public class Order {
 
 	// ---------- Estado ----------
 
+	// Estados de cocina y CANCELADO. CIERRAYPAGA no se pone a mano: lo pone registrarCobro cuando está todo cobrado.
 	public void cambiarEstado(OrderStatus status, LocalDateTime now) {
 		comprobarAbierta();
-		this.status = estadoObligatorio(status);
+		estadoObligatorio(status);
+		if(status == OrderStatus.CIERRAYPAGA) {
+			throw new OrderException("Un pedido solo se cierra y paga al cobrarlo entero");
+		}
+		if(status == OrderStatus.CANCELADO && paidAmount.signum() > 0) {
+			throw new OrderException("No se puede cancelar el pedido " + orderNumber + ": ya tiene " + paidAmount
+					+ " cobrados");
+		}
+		this.status = status;
 		if(status == OrderStatus.LISTO) {
 			this.cookedAt = now;
 		}
 		this.updatedAt = now;
+	}
+
+
+	// ---------- Cobro ----------
+
+	// Lo que queda por pagar. 0 cuando el pedido está pagado del todo.
+	public BigDecimal getImportePendiente() {
+		return total.subtract(paidAmount);
+	}
+
+	/**
+	 * Suma un cobro al pedido. El importe ya viene calculado por Payment.crearUnPayment, pero el pedido lo vuelve a
+	 * comprobar: es quien sabe lo pendiente de verdad (y lo que se valida aquí es lo que protege el @Version).
+	 * Si con este cobro queda todo pagado, el pedido pasa a CIERRAYPAGA y se cierra.
+	 */
+	public void registrarCobro(BigDecimal importe, LocalDateTime now) {
+		comprobarAbierta();
+		if(items.isEmpty()) {
+			throw new OrderException("No se puede cobrar un pedido sin líneas");
+		}
+		if(importe == null || importe.signum() <= 0) {
+			throw new OrderException("El importe del cobro tiene que ser mayor que 0");
+		}
+		BigDecimal pendiente = getImportePendiente();
+		if(importe.compareTo(pendiente) > 0) {
+			throw new OrderException("El cobro (" + importe + ") supera lo pendiente del pedido (" + pendiente + ")");
+		}
+		this.paidAmount = paidAmount.add(importe);
+		this.updatedAt = now;
+		// compareTo y no equals: con BigDecimal, 13.8 y 13.80 no son equals (distinta escala) pero valen lo mismo.
+		if(paidAmount.compareTo(total) == 0) {
+			this.status = OrderStatus.CIERRAYPAGA;
+			this.paidAt = now;
+		}
 	}
 
 	// Abierto: todavía se puede modificar. Pagado o cancelado, el pedido queda cerrado (historial de facturación).
@@ -234,24 +314,41 @@ public class Order {
 		}
 	}
 
+	// Con algo ya cobrado, el total no puede quedar por debajo (habría que devolver dinero). Se comprueba ANTES de
+	// cambiar nada, con el total que quedaría, para que el pedido nunca se quede en un estado imposible.
+	// El total es siempre la suma exacta de las líneas (base + cuota = importe con IVA), así que basta con
+	// restar el importe de la línea que cambia y sumar el nuevo.
+	private void comprobarTotalCubreLoCobrado(BigDecimal totalQueQuedaria) {
+		if(totalQueQuedaria.compareTo(paidAmount) < 0) {
+			throw new OrderException("El pedido ya tiene " + paidAmount + " cobrados: el total no puede quedar en "
+					+ totalQueQuedaria);
+		}
+	}
+
+	// Vuelve a la cola de cocina: ENVIADO y sin hora de terminado (se pondrá otra vez al pasar a LISTO).
+	private void mandarACocina() {
+		this.status = OrderStatus.ENVIADO;
+		this.cookedAt = null;
+	}
+
 	private OrderItem buscarItem(UUID itemPublicId) {
+		if(itemPublicId == null) {
+			throw new OrderException("La línea es obligatoria");
+		}
 		return items.stream()
 				.filter(item -> item.getPublicId().equals(itemPublicId))
 				.findFirst()
 				.orElseThrow(() -> new OrderException("La línea no pertenece a este pedido"));
 	}
 
-	// Los precios de la carta llevan el IVA incluido, así que el IVA se "saca" del importe de las líneas:
-	//   base (subtotal) = importe / (1 + tipo/100), redondeada a céntimos
-	//   cuota (taxAmount) = importe - base  -> base + cuota es siempre el importe exacto, sin céntimos perdidos
-	//   total = base + cuota + propina       -> la propina voluntaria no lleva IVA
-	// Se calcula sobre el importe del pedido entero, no línea a línea, para que los redondeos no se acumulen.
+	
+	
 	private void recalcularTotales(LocalDateTime now) {
 		BigDecimal importeConIva = items.stream().map(OrderItem::getLineTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal divisor = BigDecimal.ONE.add(taxRate.divide(CIEN));
 		this.subtotal = importeConIva.divide(divisor, 2, RoundingMode.HALF_UP);
 		this.taxAmount = importeConIva.subtract(subtotal);
-		this.total = subtotal.add(taxAmount).add(tipAmount);
+		this.total = subtotal.add(taxAmount);
 		this.updatedAt = now;
 	}
 
@@ -289,11 +386,14 @@ public class Order {
 	public BigDecimal getTaxAmount() {
 		return taxAmount;
 	}
-	public BigDecimal getTipAmount() {
-		return tipAmount;
-	}
 	public BigDecimal getTotal() {
 		return total;
+	}
+	public BigDecimal getPaidAmount() {
+		return paidAmount;
+	}
+	public LocalDateTime getPaidAt() {
+		return paidAt;
 	}
 	public LocalDateTime getCreatedAt() {
 		return createdAt;

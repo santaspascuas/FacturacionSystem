@@ -20,11 +20,14 @@ public class OrderItem {
 	private int quantity;
 	private BigDecimal lineTotal;
 	private String notes;
+	// Clave del envío del TPV que creó la línea (la "comanda"). Todas las líneas de un mismo envío comparten clave:
+	// si el TPV reintenta ese envío, el pedido ve que ya tiene líneas con esa clave y no las duplica. Opcional.
+	private final String idempotencyKey;
 	private final LocalDateTime createdAt;
 
 
 	private OrderItem(Long id, UUID publicId, Long menuItemId, String productName, BigDecimal unitPrice, int quantity,
-			BigDecimal lineTotal, String notes, LocalDateTime createdAt) {
+			BigDecimal lineTotal, String notes, String idempotencyKey, LocalDateTime createdAt) {
 		super();
 		this.id = id;
 		this.publicId = publicId;
@@ -34,25 +37,28 @@ public class OrderItem {
 		this.quantity = quantity;
 		this.lineTotal = lineTotal;
 		this.notes = notes;
+		this.idempotencyKey = idempotencyKey;
 		this.createdAt = createdAt;
 	}
 
 
 	// El nombre y el precio se copian del producto (MenuItem) al crear la línea: después ya no cambian.
 	public static OrderItem crearOrderItem(Long menuItemId, String productName, BigDecimal unitPrice, Integer quantity,
-			String notes, LocalDateTime now) {
+			String notes, String idempotencyKey, LocalDateTime now) {
 		if(menuItemId == null) {
 			throw new OrderException("El producto de la línea es obligatorio");
 		}
 		int cantidad = cantidadValida(quantity);
 		BigDecimal precio = precioValido(unitPrice);
 		return new OrderItem(null, UUID.randomUUID(), menuItemId, nombreObligatorio(productName), precio, cantidad,
-				calcularTotal(precio, cantidad), notasOpcionales(notes), now);
+				calcularTotal(precio, cantidad), notasOpcionales(notes), Order.claveOpcional(idempotencyKey), now);
 	}
 
 	public static OrderItem restoreData(Long id, UUID publicId, Long menuItemId, String productName,
-			BigDecimal unitPrice, int quantity, BigDecimal lineTotal, String notes, LocalDateTime createdAt) {
-		return new OrderItem(id, publicId, menuItemId, productName, unitPrice, quantity, lineTotal, notes, createdAt);
+			BigDecimal unitPrice, int quantity, BigDecimal lineTotal, String notes, String idempotencyKey,
+			LocalDateTime createdAt) {
+		return new OrderItem(id, publicId, menuItemId, productName, unitPrice, quantity, lineTotal, notes,
+				idempotencyKey, createdAt);
 	}
 
 
@@ -93,9 +99,16 @@ public class OrderItem {
 	// ---------- Comportamiento ----------
 	// Son de paquete (sin public): una línea solo cambia a través de su pedido, que recalcula sus totales.
 
-	void cambiarCantidad(Integer quantity) {
+	// Devuelve true si la cantidad sube: hay más unidades que cocinar y el pedido tiene que volver a cocina.
+	boolean cambiarCantidad(Integer quantity) {
+		int anterior = this.quantity;
 		this.quantity = cantidadValida(quantity);
 		this.lineTotal = calcularTotal(unitPrice, this.quantity);
+		return this.quantity > anterior;
+	}
+
+	boolean esDelEnvio(String clave) {
+		return clave != null && clave.equals(idempotencyKey);
 	}
 
 	void cambiarNotas(String notes) {
@@ -126,6 +139,9 @@ public class OrderItem {
 	}
 	public String getNotes() {
 		return notes;
+	}
+	public String getIdempotencyKey() {
+		return idempotencyKey;
 	}
 	public LocalDateTime getCreatedAt() {
 		return createdAt;

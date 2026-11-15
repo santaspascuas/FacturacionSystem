@@ -47,8 +47,9 @@ public class OrderEntityMapper {
 		entidad.setSubtotal(order.getSubtotal());
 		entidad.setTaxRate(order.getTaxRate());
 		entidad.setTaxAmount(order.getTaxAmount());
-		entidad.setTipAmount(order.getTipAmount());
 		entidad.setTotal(order.getTotal());
+		entidad.setPaidAmount(order.getPaidAmount());
+		entidad.setPaidAt(order.getPaidAt());
 		entidad.setCreatedAt(order.getCreatedAt());
 		entidad.setUpdatedAt(order.getUpdatedAt());
 		entidad.setCookedAt(order.getCookedAt());
@@ -86,6 +87,7 @@ public class OrderEntityMapper {
 		linea.setQuantity(item.getQuantity());
 		linea.setLineTotal(item.getLineTotal());
 		linea.setNotes(item.getNotes());
+		linea.setIdempotencyKey(item.getIdempotencyKey());
 		linea.setCreatedAt(item.getCreatedAt());
 		// No se llama a setOrder: lo hace entidad.addItem(...) en dominioToJpa.
 		return linea;
@@ -105,8 +107,9 @@ public class OrderEntityMapper {
 		entidad.setNumPersonas(order.getNumPersonas());
 		entidad.setSubtotal(order.getSubtotal());
 		entidad.setTaxAmount(order.getTaxAmount());
-		entidad.setTipAmount(order.getTipAmount());
 		entidad.setTotal(order.getTotal());
+		entidad.setPaidAmount(order.getPaidAmount());
+		entidad.setPaidAt(order.getPaidAt());
 		entidad.setUpdatedAt(order.getUpdatedAt());
 		entidad.setCookedAt(order.getCookedAt());
 		entidad.setSyncStatus(order.getSyncStatus());
@@ -174,7 +177,8 @@ public class OrderEntityMapper {
 		return Order.restoreData(entidad.getOrderId(), entidad.getTenantId(), entidad.getPublicId(),
 				entidad.getOrderNumber(), entidad.getOrderType(), entidad.getStatus(), tableId,
 				entidad.getNumPersonas(), items, entidad.getSubtotal(), entidad.getTaxRate(), entidad.getTaxAmount(),
-				entidad.getTipAmount(), entidad.getTotal(), entidad.getCreatedAt(), entidad.getUpdatedAt(),
+				entidad.getTotal(), entidad.getPaidAmount(), entidad.getPaidAt(), entidad.getCreatedAt(),
+				entidad.getUpdatedAt(),
 				entidad.getCookedAt(), entidad.getIdempotencyKey(), entidad.getClientTimestamp(),
 				entidad.getSyncStatus());
 	}
@@ -183,7 +187,7 @@ public class OrderEntityMapper {
 	private static OrderItem itemToDominio(OrderItemEntity linea) {
 		return OrderItem.restoreData(linea.getOrderitemId(), linea.getPublicId(), linea.getMenuItem().getMenuitemsId(),
 				linea.getProductName(), linea.getUnitPrice(), linea.getQuantity(), linea.getLineTotal(),
-				linea.getNotes(), linea.getCreatedAt());
+				linea.getNotes(), linea.getIdempotencyKey(), linea.getCreatedAt());
 	}
 
 }

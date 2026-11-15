@@ -62,6 +62,10 @@ public class OrderItemEntity {
 	@Column(length = 255)
 	private String notes;
 
+	// Clave del envío del TPV que creó la línea: todas las líneas de un envío la comparten (no es UNIQUE).
+	@Column(name = "idempotency_key", length = 100, updatable = false)
+	private String idempotencyKey;
+
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;
 
@@ -140,6 +144,14 @@ public class OrderItemEntity {
 
 	public void setNotes(String notes) {
 		this.notes = notes;
+	}
+
+	public String getIdempotencyKey() {
+		return idempotencyKey;
+	}
+
+	public void setIdempotencyKey(String idempotencyKey) {
+		this.idempotencyKey = idempotencyKey;
 	}
 
 	public LocalDateTime getCreatedAt() {

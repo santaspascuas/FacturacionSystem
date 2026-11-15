@@ -7,7 +7,10 @@
       "Read(//d/git/FacturacionSystem/product-service/src/main/resources/**)",
       "Read(//d/git/FacturacionSystem/product-service/src/test/**)",
       "PowerShell(Set-Location D:\\\\git\\\\FacturacionSystem\\\\product-service; .\\\\mvnw.cmd -o -q test-compile; \"exit=$LASTEXITCODE\")",
-      "PowerShell(Remove-Item -Confirm:$false \"D:\\\\git\\\\FacturacionSystem\\\\product-service\\\\src\\\\main\\\\java\\\\com\\\\facturacionAutonomo\\\\product_service\\\\infraestructure\\\\config\\\\PropertiesTipoImpositivoAdapter.java\")"
+      "PowerShell(Remove-Item -Confirm:$false \"D:\\\\git\\\\FacturacionSystem\\\\product-service\\\\src\\\\main\\\\java\\\\com\\\\facturacionAutonomo\\\\product_service\\\\infraestructure\\\\config\\\\PropertiesTipoImpositivoAdapter.java\")",
+      "PowerShell(Remove-Item -Confirm:$false \"D:\\\\git\\\\FacturacionSystem\\\\product-service\\\\src\\\\main\\\\java\\\\com\\\\facturacionAutonomo\\\\product_service\\\\domain\\\\model\\\\Paymentype.java\")",
+      "PowerShell(Set-Location D:\\\\git\\\\FacturacionSystem\\\\product-service; .\\\\mvnw.cmd -o -q test-compile 2>&1 | Select-String -Pattern 'ERROR' | Select-Object -First 10; \"exit=$LASTEXITCODE\")",
+      "PowerShell(Remove-Item -Confirm:$false \"D:\\\\git\\\\FacturacionSystem\\\\product-service\\\\src\\\\main\\\\java\\\\com\\\\facturacionAutonomo\\\\product_service\\\\application\\\\port\\\\OUT\\\\PaymenteRepositoryPort.java\")"
     ],
     "additionalDirectories": [
       "D:\\git\\FacturacionSystem\\product-service\\src\\main\\resources"

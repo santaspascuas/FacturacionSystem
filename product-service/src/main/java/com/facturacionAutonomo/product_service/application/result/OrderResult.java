@@ -1,6 +1,7 @@
 package com.facturacionAutonomo.product_service.application.result;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -23,8 +24,10 @@ public record OrderResult(
 		BigDecimal subtotal,      // base imponible (sin IVA)
 		BigDecimal taxRate,       // tipo de IVA aplicado, en %
 		BigDecimal taxAmount,     // cuota de IVA
-		BigDecimal tipAmount,
-		BigDecimal total,
+		BigDecimal total,         // base + cuota = lo que paga el cliente
+		BigDecimal paidAmount,    // lo cobrado hasta ahora
+		BigDecimal pendingAmount, // lo que queda por pagar: el TPV sigue cobrando hasta que sea 0
+		LocalDateTime paidAt,     // cuándo quedó pagado del todo (null si queda algo pendiente)
 		List<OrderItemResult> items
 		) {
 
@@ -33,8 +36,9 @@ public record OrderResult(
 	public static OrderResult convertirA(Order order, TableRestautant mesa) {
 		return new OrderResult(order.getPublicId(), order.getOrderNumber(), order.getOrderType(), order.getStatus(),
 				mesa != null ? mesa.getPublicId() : null, mesa != null ? mesa.getTableNumber() : null,
-				order.getNumPersonas(), order.getSubtotal(), order.getTaxRate(), order.getTaxAmount(), order.getTipAmount(),
-				order.getTotal(), order.getItems().stream().map(OrderItemResult::convertirA).toList());
+				order.getNumPersonas(), order.getSubtotal(), order.getTaxRate(), order.getTaxAmount(),
+				order.getTotal(), order.getPaidAmount(), order.getImportePendiente(), order.getPaidAt(),
+				order.getItems().stream().map(OrderItemResult::convertirA).toList());
 	}
 
 }
