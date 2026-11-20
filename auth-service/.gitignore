@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+# Archivos de documentación propios del proyecto / asistente
+CLAUDE.md
+claude.md
+HELP.md

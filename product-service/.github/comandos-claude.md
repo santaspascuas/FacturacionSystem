@@ -63,7 +63,7 @@ for ($i = 0; $i -lt 90; $i++) { if (Get-NetTCPConnection -LocalPort 8099 -State 
 ```
 
 - El servicio sigue vivo en las llamadas siguientes. Si no llega a escuchar, mira el final de `$log`.
-- Contra la BD del usuario, solo cuando lo pida (por ejemplo, con "corre"): el mismo `Start-Process` sin las variables. Escucha en el 8082 y aplica las migraciones pendientes.
+- Contra la BD del usuario, solo cuando lo pida (por ejemplo, con "corre"): el mismo `Start-Process` sin las variables. Escucha en el 8083 y aplica las migraciones pendientes.
 
 Para pararlo, usa el dueño del puerto. El PID de `Start-Process` es el lanzador de `javapath`, no la JVM:
 

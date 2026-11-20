@@ -1,0 +1,90 @@
+spring:
+  application:
+    name: documentacionfactura-service
+  config:
+    import: "optional:file:.env[.properties]"
+
+  datasource:
+    url: "jdbc:postgresql://${DOCUMENTACION_DB_HOST:localhost}:${DOCUMENTACION_DB_PORT:55435}/${DOCUMENTACION_DB_POSTGRES:documentacion_db}"
+    username: ${DOCUMENTACION_DB_USER:postgres}
+    password: ${DOCUMENTACION_DB_PASSWORD:postgres}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        # Entre corchetes: en las claves de un mapa, Spring quita los caracteres que no son letras, números, - o .
+        # Sin ellos, format_sql llegaría a Hibernate como formatsql.
+        "[format_sql]": true
+
+# Puertos: 8080 api-gateway, 8081 auth-service, 8082 customer-service, 8083 product-service,
+# 8084 documentacionfactura-service
+server:
+  port: ${SERVER_PORT:8084}
+
+clients:
+  # product-service (ProductServiceClientProperties): pedidos y cobros. Se llama directamente, sin pasar por el
+  # gateway, con la cabecera X-Tenant-Id. Los tiempos de espera evitan que un servicio colgado bloquee la petición
+  # del TPV.
+  product-service:
+    base-url: ${PRODUCT_SERVICE_URL:http://localhost:8083}
+    connect-timeout: 2s
+    read-timeout: 5s
+
+# customer-service (CustomerServiceProperties): datos fiscales del restaurante (el emisor del ticket), en
+# GET /api/customer/infome. Se llama directamente, sin pasar por el gateway, con la cabecera X-Tenant-Id.
+customer:
+  base-url: ${CUSTOMER_SERVICE_URL:http://localhost:8082}
+  connect-timeout: 2s
+  read-timeout: 5s
+
+# Circuit breakers de las llamadas a otros servicios: @CircuitBreaker(name = "...") en cada caller. Estas claves las
+# lee Resilience4j (resilience4j-spring-boot4) y valida sus valores al arrancar: si uno no tiene sentido, el
+# servicio no arranca.
+#
+# Estados:
+#   CLOSED    -> normal: las llamadas pasan y se van contando los fallos.
+#   OPEN      -> demasiados fallos: no se llama al servicio y se falla al momento (el fallback responde 502)
+#                durante wait-duration-in-open-state.
+#   HALF_OPEN -> pasado ese tiempo, se dejan pasar unas pocas llamadas de prueba: si van bien, CLOSED; si no, OPEN.
+#
+# Los valores se escriben una sola vez en configs.default y cada instancia los hereda con base-config. Cada instancia
+# lleva su propio contador: si se cae customer-service, se abre su circuito y product-service sigue funcionando.
+resilience4j:
+  circuitbreaker:
+    instances:
+      # ProductServiceCaller.get
+      product-service:
+        base-config: default
+      # CustomerServiceCaller.get (el caller nuevo): el nombre de la anotación tiene que ser exactamente este.
+      customer-service:
+        base-config: default
+    configs:
+      default:
+        # Ventana por número de llamadas: se miran las últimas N llamadas al servicio.
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        # No se decide nada hasta tener al menos estas llamadas en la ventana (evita abrir por 1 fallo de 1 llamada).
+        minimum-number-of-calls: 5
+        # Se abre si falla este porcentaje de las llamadas de la ventana.
+        failure-rate-threshold: 50
+        # Cuánto tiempo se queda abierto antes de probar otra vez.
+        wait-duration-in-open-state: 30s
+        # Llamadas de prueba que se dejan pasar en HALF_OPEN.
+        permitted-number-of-calls-in-half-open-state: 2
+        # Pasado el tiempo en OPEN, pasa solo a HALF_OPEN (sin esperar a que llegue una petición).
+        automatic-transition-from-open-to-half-open-enabled: true
+        # Solo cuentan como fallo los ServicioExternoException (sin conexión, timeout, 5xx, JSON ilegible).
+        # Un 404 (el pedido no existe) devuelve Optional.empty(): es una respuesta correcta y no abre el circuito.
+        record-exceptions:
+          - com.facturacionAutonomo.documentacionfactura_service.domain.exception.ServicioExternoException
+
+# Logs
+logging:
+  level:
+    # Entre corchetes por el guion bajo de documentacionfactura_service (ver format_sql arriba).
+    "[com.facturacionAutonomo.documentacionfactura_service]": DEBUG
+    org.hibernate.SQL: debug
+    org.hibernate.orm.jdbc.bind: trace
